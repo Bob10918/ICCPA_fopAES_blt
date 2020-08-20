@@ -15,8 +15,10 @@
 #include <stdlib.h>
 #include <math.h>
 
-#define TRUE 1
+#define TRUE 0xff
 #define FALSE 0
+#define BYTE_SPACE 256
+
 #define KEY_SIZE 16     //key size in byte
 
 typedef struct r{
@@ -24,6 +26,11 @@ typedef struct r{
     char value;
     r* next;
 }relation;
+
+typedef struct se{
+    char subkeys[BYTE_SPACE][KEY_SIZE];
+    se* next;
+}subkey_element;
 
 const int l;        //number of points acquired per instruction processing
 const float*** T;      //array containing all the power traces (divided per messages)
@@ -44,7 +51,7 @@ int main(int argc, char** argv) {
     struct relation relations[KEY_SIZE] = get_relations(T, N, m, M);
     
     
-    
+    //liberare memoria alla fine
     return (EXIT_SUCCESS);
 }
 
@@ -119,6 +126,8 @@ struct relation* get_relations(float*** T, int N, char** m, int M){
                      * performance when searching for a relation involving a 
                      * specific byte
                      */
+                    
+                    //controllare che la relazione non esissta già
                     struct relation new_relation = malloc(sizeof(struct relation));
                     char new_value = (m[i][j])^(m[i][k]);
                     new_relation->in_relation_with = k;
@@ -136,4 +145,69 @@ struct relation* get_relations(float*** T, int N, char** m, int M){
         }
     }
     return relations;
+}
+
+/*
+ Recursive function no, too much overhead
+ */
+void guess_key(struct relation* relations){
+    int i=0;
+    int guessed[KEY_SIZE];
+    struct subkey_element* subkeys_list=NULL;
+    
+    for(i=0; i<KEY_SIZE; i++){
+        guessed[i]=FALSE;
+    }
+    
+    for(i=0; i<KEY_SIZE; i++){
+        if(guessed[i]==FALSE){
+            guess_subkey(i, relations, guessed, &subkeys_list);
+        }
+    }
+    combine_subkeys();  //TODO
+}
+
+int guess_subkey(int to_guess, struct relation* relations, int* guessed, struct subkey_element** subkeys_list){
+    int i=0;
+    unsigned char c=0;
+    char xor_array[KEY_SIZE];
+    char new_guessed[KEY_SIZE];
+    for(i=0; i<KEY_SIZE; i++){
+        new_guessed[i]=FALSE;
+    }
+    new_guessed[to_guess] = TRUE;
+    char random_value[KEY_SIZE];
+    struct subkey_element* new_subkeys = malloc(sizeof(struct subkey_element));
+    
+    if(relations[to_guess]!=NULL){
+        resolve_relations(to_guess, relations, new_guessed, 0x00, xor_array);
+    }
+    for(c=0; c<256; c++){
+        for(i=0; i<KEY_SIZE; i++){
+            random_value[i]=c;
+        }
+        for(i=0; i<KEY_SIZE/(sizeof(int)/sizeof(char)); i++){
+            (int**) (new_subkeys->subkeys[c][i]) = ((int*) random_value)[i] ^ ((int*) xor_array)[i] & ((int*) new_guessed)[i];     //int optimization
+        }
+    }
+    new_subkeys->next = *subkeys_list;
+    *subkeys_list = new_subkeys;
+    for(i=0; i<KEY_SIZE; i++){
+        guessed[i] = guessed[i] | new_guessed[i];   //controllare se funziona, è un or tra int e char
+    }
+    
+}
+
+
+
+void resolve_relations(int start, struct relation* relations, char* new_guessed, char* xor_array){        
+    new_guessed[start]=TRUE;
+    struct relation* pointer = relations[start];
+    while(pointer!=NULL){
+        if(new_guessed[pointer->in_relation_with]==FALSE){
+            xor_array[pointer->in_relation_with] = xor_array[start] ^ (pointer->value);
+            resolve_relations(pointer->in_relation_with, relations, new_guessed, xor_array);
+        }            
+        pointer = pointer->next;
+    }
 }
