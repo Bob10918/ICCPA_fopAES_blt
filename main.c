@@ -13,32 +13,43 @@
 
 #include <stdio.h>
 #include <stdlib.h>
-#include <math.h>
+#include "math.h"
 
 #define TRUE 0xff
 #define FALSE 0
 #define BYTE_SPACE 256
 
 #define KEY_SIZE 16     //key size in byte
+#define KEY_SIZE_INT KEY_SIZE/(sizeof(int)/sizeof(char))    //key size in integers
 
-typedef struct r{
+typedef struct Relation_s{
     int in_relation_with;
     char value;
-    r* next;
-}relation;
+    struct Relation_s* next;
+}Relation;  //controllare se struct sono puntatori
 
-typedef struct se{
+typedef struct Subkey_element_s{
     char subkeys[BYTE_SPACE][KEY_SIZE];
-    se* next;
-}subkey_element;
+    struct Subkey_element_s* next;
+}Subkey_element;
 
-const int l;        //number of points acquired per instruction processing
-const float*** T;      //array containing all the power traces (divided per messages)
-const int N;        //number of power traces captured from a device processing N encryptions of the same message
-const int M;        //number of plaintext messages
-const float threshold;    //threshold for collision determination
+int l;        //number of points acquired per instruction processing
+float*** T;      //array containing all the power traces (divided per messages)
+int N;        //number of power traces captured from a device processing N encryptions of the same message
+int M;        //number of plaintext messages
+float threshold;    //threshold for collision determination
+
+void get_relations(float*** T, int N, char** m, int M, Relation** relations);
+void guess_key(Relation** relations);
+float standard_deviation(float** T, int theta, int t);
+float covariance(float** T, int theta0, int theta1, int t);
+void pearson(float** T, int theta0, int theta1, float* correlation);
+Subkey_element* guess_subkey(int to_guess, Relation** relations, int* guessed);
+void resolve_relations(int start, Relation** relations, char* new_guessed, char* xor_array);
+void combine_subkeys(Subkey_element* subkeys_list, int* partial_key);
 
 int main(int argc, char** argv) {
+    /*
     //da capire bene come vengono passati i parametri
     l = argv[1]; 
     //power traces are provided as array of integers (each int is the measured power in the correspondant instant)
@@ -48,8 +59,13 @@ int main(int argc, char** argv) {
     M = sizeof(m)/sizeof(m[0]);
     //TODO controllare se l divide N?
     threshold = argv[4];
-    struct relation relations[KEY_SIZE] = get_relations(T, N, m, M);
+    */
+    char** m;
     
+    Relation* relations[KEY_SIZE];
+    
+    get_relations(T, N, m, M, relations);
+    guess_key(relations);
     
     //liberare memoria alla fine
     return (EXIT_SUCCESS);
@@ -60,7 +76,8 @@ int main(int argc, char** argv) {
 //as criterion we used the maximum Pearson correlation factor
 //theta0 and theta1 are time instant at which instruction starts (for performance reasons)
 int collision(float** T, int theta0, int theta1){
-    float correlation[l] = pearson(T, theta0, theta1);
+    float correlation[l];
+    pearson(T, theta0, theta1, correlation);
     float max = correlation[0];
     for(int i=1; i<l; i++){
         if(correlation[i]>max){
@@ -76,13 +93,11 @@ int collision(float** T, int theta0, int theta1){
     //TODO migliorabile anche questa, tipo calcolando il max direttamente in pearson, appena dopo averlo calcolato
 }
 
-float* pearson(float** T, int theta0, int theta1){
-    float correlation[l];
+void pearson(float** T, int theta0, int theta1, float* correlation){
     int i;
     for(i=0; i<l; i++){
         correlation[i] = covariance(T, theta0, theta1, i)/(standard_deviation(T, theta0, i)*standard_deviation(T, theta1, i));
     }
-    return correlation;
 }
 
 float* optimized_pearson(){
@@ -108,11 +123,10 @@ float standard_deviation(float** T, int theta, int t){
         first_sum += (T[i][theta+t])*(T[i][theta+t]);
         second_sum += T[i][theta+t];
     }
-    return sqrt((N*first_sum)-(second_sum*second_sum));
+    return sqrtf((N*first_sum)-(second_sum*second_sum));
 }
 
-struct relation* get_relations(float*** T, int N, char** m, int M){
-    struct relation relations[KEY_SIZE];
+void get_relations(float*** T, int N, char** m, int M, Relation** relations){
     int i, j, k;
     for(i=0; i<KEY_SIZE; i++){
         relations[i]=NULL;
@@ -128,14 +142,14 @@ struct relation* get_relations(float*** T, int N, char** m, int M){
                      */
                     
                     //controllare che la relazione non esissta già
-                    struct relation new_relation = malloc(sizeof(struct relation));
+                    Relation* new_relation = malloc(sizeof(Relation));
                     char new_value = (m[i][j])^(m[i][k]);
                     new_relation->in_relation_with = k;
                     new_relation->value = new_value;
                     new_relation->next = relations[j];
                     relations[j] = new_relation;
                     
-                    new_relation = malloc(sizeof(struct relation));
+                    new_relation = malloc(sizeof(Relation));
                     new_relation->in_relation_with = j;
                     new_relation->value = new_value;
                     new_relation->next = relations[k];
@@ -144,70 +158,101 @@ struct relation* get_relations(float*** T, int N, char** m, int M){
             }      
         }
     }
-    return relations;
 }
+
+
 
 /*
  Recursive function no, too much overhead
  */
-void guess_key(struct relation* relations){
+void guess_key(Relation** relations){
     int i=0;
     int guessed[KEY_SIZE];
-    struct subkey_element* subkeys_list=NULL;
-    
     for(i=0; i<KEY_SIZE; i++){
         guessed[i]=FALSE;
     }
+    Subkey_element* subkeys_list = NULL;
+    Subkey_element* new_subkey;
+    int initial_key[KEY_SIZE_INT];
     
     for(i=0; i<KEY_SIZE; i++){
         if(guessed[i]==FALSE){
-            guess_subkey(i, relations, guessed, &subkeys_list);
+            new_subkey = guess_subkey(i, relations, guessed);
+            new_subkey->next = subkeys_list;
+            subkeys_list = new_subkey;
         }
     }
-    combine_subkeys();  //TODO
+    
+    for(i=0; i<KEY_SIZE_INT; i++){
+        initial_key[i] = 0;
+    }
+    combine_subkeys(subkeys_list, initial_key);
+    //liberare memoria subkeys
 }
 
-int guess_subkey(int to_guess, struct relation* relations, int* guessed, struct subkey_element** subkeys_list){
+Subkey_element* guess_subkey(int to_guess, Relation** relations, int* guessed){
     int i=0;
     unsigned char c=0;
     char xor_array[KEY_SIZE];
     char new_guessed[KEY_SIZE];
     for(i=0; i<KEY_SIZE; i++){
         new_guessed[i]=FALSE;
+        xor_array[i] = 0x00;
     }
     new_guessed[to_guess] = TRUE;
     char random_value[KEY_SIZE];
-    struct subkey_element* new_subkeys = malloc(sizeof(struct subkey_element));
+    Subkey_element* new_subkeys = malloc(sizeof(Subkey_element));
     
     if(relations[to_guess]!=NULL){
-        resolve_relations(to_guess, relations, new_guessed, 0x00, xor_array);
+        resolve_relations(to_guess, relations, new_guessed, xor_array);
     }
     for(c=0; c<256; c++){
         for(i=0; i<KEY_SIZE; i++){
             random_value[i]=c;
         }
-        for(i=0; i<KEY_SIZE/(sizeof(int)/sizeof(char)); i++){
-            (int**) (new_subkeys->subkeys[c][i]) = ((int*) random_value)[i] ^ ((int*) xor_array)[i] & ((int*) new_guessed)[i];     //int optimization
+        for(i=0; i<KEY_SIZE_INT; i++){
+            ((int**) (new_subkeys->subkeys))[c][i] = ((int*) random_value)[i] ^ ((int*) xor_array)[i] & ((int*) new_guessed)[i];     //int optimization
         }
     }
-    new_subkeys->next = *subkeys_list;
-    *subkeys_list = new_subkeys;
     for(i=0; i<KEY_SIZE; i++){
         guessed[i] = guessed[i] | new_guessed[i];   //controllare se funziona, è un or tra int e char
     }
-    
+    return new_subkeys;
 }
 
-
-
-void resolve_relations(int start, struct relation* relations, char* new_guessed, char* xor_array){        
+void resolve_relations(int start, Relation** relations, char* new_guessed, char* xor_array){        
     new_guessed[start]=TRUE;
-    struct relation* pointer = relations[start];
+    Relation* pointer = relations[start];
     while(pointer!=NULL){
         if(new_guessed[pointer->in_relation_with]==FALSE){
             xor_array[pointer->in_relation_with] = xor_array[start] ^ (pointer->value);
             resolve_relations(pointer->in_relation_with, relations, new_guessed, xor_array);
         }            
         pointer = pointer->next;
+    }
+}
+
+
+void combine_subkeys(Subkey_element* subkeys_list, int* partial_key){
+    Subkey_element* list_pointer = subkeys_list;
+    int** subkey_pointer = (int**) list_pointer->subkeys;
+    char key[KEY_SIZE]; 
+    int i=0, j=0;
+    
+    if(list_pointer->next == NULL){
+        for(i=0; i<BYTE_SPACE; i++){
+            for(j=0; j<KEY_SIZE_INT; j++){
+                ((int*) key)[j] = partial_key[j] ^ subkey_pointer[i][j];
+            }
+            printf("%s\n", key);
+        }
+    }
+    else{
+        for(i=0; i<BYTE_SPACE; i++){
+            for(j=0; j<KEY_SIZE_INT; j++){
+                ((int*) key)[j] = partial_key[j] ^ subkey_pointer[i][j];
+            }
+            combine_subkeys(subkeys_list->next, (int*) key);
+        }
     }
 }
