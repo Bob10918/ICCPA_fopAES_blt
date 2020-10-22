@@ -13,8 +13,13 @@
 
 #include <stdio.h>
 #include <stdlib.h>
+#include <stdint.h>
+#include <string.h>
 #include <math.h>
 #include <pthread.h>
+#include <sys/types.h>
+#include <sys/stat.h>
+#include <unistd.h>
 
 #define TRUE 0xff
 #define FALSE 0
@@ -22,6 +27,9 @@
 
 #define KEY_SIZE 16     //key size in byte
 #define KEY_SIZE_INT KEY_SIZE/(sizeof(int)/sizeof(char))    //key size in integers
+
+//struct for directories management
+struct stat st = {0};
 
 typedef struct Relation_s{
     int in_relation_with;
@@ -41,9 +49,13 @@ typedef struct {
     Relation** relations;
 }Thread_args;
 
-int l;        //number of points acquired per instruction processing
+
 //float T[M][N][l*KEY_SIZE];      //array containing all the power traces (divided per messages)
 int N;        //number of power traces captured from a device processing N encryptions of the same message
+int nsamples;   //total number of samples per power trace
+int l;        //number of samples per instruction processing (clock)
+char sampletype;    //type of samples, f=float  d=double
+int plaintextlen;   //length of plaintext in bytes
 //char m[M][KEY_SIZE];
 int M;        //number of plaintext messages
 float threshold;    //threshold for collision determination
@@ -53,6 +65,8 @@ int threads_number = 0;
 pthread_mutex_t mutex_threads_number = PTHREAD_MUTEX_INITIALIZER;
 pthread_mutex_t mutex_relations = PTHREAD_MUTEX_INITIALIZER;
 
+void read_data(FILE* input, FILE* traces_pointers[plaintextlen][BYTE_SPACE], char plaintexts[M][plaintextlen]);
+void read_traces_float(FILE* input, FILE* traces_pointers[plaintextlen][BYTE_SPACE], char plaintexts[M][plaintextlen]);
 void get_relations(float T[M][N][l*KEY_SIZE], char m[M][KEY_SIZE], Relation** relations);
 void* find_collisions(void* args);
 void guess_key(Relation** relations);
@@ -65,21 +79,6 @@ Subkey_element* guess_subkey(int to_guess, Relation** relations, int* guessed);
 void resolve_relations(int start, Relation** relations, char* new_guessed, char* xor_array);
 void combine_subkeys(Subkey_element* subkeys_list, int* partial_key);
 
-void create_params(float T[M][N][l*KEY_SIZE], char m[M][KEY_SIZE]){
-    int i,j,k, h;
-    for(i=0; i<M; i++){
-        for(j=0; j<N; j++){
-            for(k=0; k<KEY_SIZE; k++){
-                for(h=0; h<l; h++){
-                    T[i][j][k*l+h] = h;
-                }
-            }
-        }
-        for(j=0; j<KEY_SIZE; j++){
-            m[i][j] = (char) j;
-        }
-    }
-}
 
 int main(int argc, char** argv) {
     /*
@@ -94,15 +93,64 @@ int main(int argc, char** argv) {
     threshold = argv[4];
     */
     
+    FILE* infile = fopen(argv[1], "r");
+    fread(&N, sizeof(uint32_t), 1, infile);
+    int n = N;      //only for debugging
+    fread(&nsamples, sizeof(uint32_t), 1, infile);
+    l = 15;      //could be set at nsamples/KEY_SIZE/number_of_rounds
+    fread(&sampletype, sizeof(char), 1, infile);
+    char st = sampletype;
+    uint8_t plaintextlen_temp;
+    fread(&plaintextlen_temp, sizeof(uint8_t), 1, infile);
+    plaintextlen = (int) plaintextlen_temp;
+    int ptl = plaintextlen;     //only for debugging
+    FILE* traces_pointers[plaintextlen][BYTE_SPACE];
     
-    l = 3;
-    N = 5;
-    M = 3;
-    threshold = 0.9;
+    if (stat("./iccpa_fopaes_temp", &st) == -1) {
+        mkdir("./iccpa_fopaes_temp", 0700);
+    }
+    FILE* fcurr;
+    char fcurr_name[50];
+    char to_concat[10];
+    for(int i=0 ; i<plaintextlen ; i++){
+        for(int j=0 ; j<BYTE_SPACE ; j++){
+            strcpy(fcurr_name, "./iccpa_fopaes_temp/");
+            sprintf(to_concat, "%d", i+1);
+            strcat(fcurr_name, to_concat);
+            strcat(fcurr_name, "_");
+            sprintf(to_concat, "%d", j);
+            strcat(fcurr_name, to_concat);
+            traces_pointers[i][j] = fopen(fcurr_name, "w+");
+        }
+    }
+    
+    
+    M = N;      //could be changed
+    threshold = 0.9;    //could be changed
     max_threads = 4;
-    float T[M][N][l*KEY_SIZE];
-    char m[M][KEY_SIZE];
-    create_params(T, m);
+    
+    char m[M][plaintextlen];
+    
+    read_data(infile, traces_pointers, m);
+    
+    for(int i=0 ; i<plaintextlen ; i++){
+        for(int j=0 ; j<BYTE_SPACE ; j++){
+            fclose(traces_pointers[i][j]);
+        }
+    }
+    fclose(infile);
+    
+    for(int i=0 ; i<plaintextlen ; i++){
+        for(int j=0 ; j<BYTE_SPACE ; j++){
+            strcpy(fcurr_name, "./iccpa_fopaes_temp/");
+            sprintf(to_concat, "%d", i+1);
+            strcat(fcurr_name, to_concat);
+            strcat(fcurr_name, "_");
+            sprintf(to_concat, "%d", j);
+            strcat(fcurr_name, to_concat);
+            traces_pointers[i][j] = fopen(fcurr_name, "r");
+        }
+    }
     
     Relation* relations[KEY_SIZE];
     
@@ -130,6 +178,46 @@ int main(int argc, char** argv) {
     pthread_mutex_destroy(&mutex_threads_number);
     
     return (EXIT_SUCCESS);
+}
+
+void read_data(FILE* input, FILE* traces_pointers[plaintextlen][BYTE_SPACE], char plaintexts[M][plaintextlen]){
+    int samples_size;
+    switch (sampletype){
+        case 'f':
+            samples_size = sizeof(float);
+            read_traces_float(input, traces_pointers, plaintexts);
+          break;
+
+        case 'd':
+            samples_size = sizeof(double);
+            //TODO
+          break;
+
+        default:
+            exit(-1);
+    }
+    
+    
+    
+    
+}
+
+void read_traces_float(FILE* input, FILE* traces_pointers[plaintextlen][BYTE_SPACE], char plaintexts[M][plaintextlen]){
+    FILE* curr;
+    float temp[plaintextlen][l];
+    
+    for(int j=0; j<N; j++){
+        for(int i=0; i<plaintextlen; i++){
+            fread( temp[i], sizeof(float), l, input);
+        }
+        fseek(input, (nsamples-(l*plaintextlen))*sizeof(float) , SEEK_CUR);
+        fread( plaintexts[j], sizeof(char), plaintextlen, input);
+        
+        for(int i=0; i<plaintextlen; i++){
+            uint8_t byte_value = (uint8_t) plaintexts[j][i];
+            fwrite(temp[i], sizeof(float), l, traces_pointers[i][byte_value]);
+        }
+    }
 }
 
 //decision function returning true or false depending on whether the same data was involved in two given instructions theta0 and theta1
