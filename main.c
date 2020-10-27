@@ -17,15 +17,17 @@
 #include <stdlib.h>
 #include <stdint.h>
 #include <unistd.h>
+#include <pthread.h>
 
 #define TRUE 0xff
 #define FALSE 0
-#define BYTE_SPACE 256
+#define BYTE_SPACE 256      //dimension of a byte, i.e. 2^8 = 256
 
 #define KEY_SIZE 16     //key size in byte
 #define KEY_SIZE_INT KEY_SIZE/(sizeof(int)/sizeof(char))    //key size in integers
 
 
+pthread_mutex_t mutex_printf = PTHREAD_MUTEX_INITIALIZER;
 
 
 typedef struct Subkey_element_s{
@@ -33,8 +35,15 @@ typedef struct Subkey_element_s{
     struct Subkey_element_s* next;
 }Subkey_element;
 
+typedef struct Printkey_thread_args_s{
+    Relation** relations;
+    uint8_t unkn_byte;
+}Printkey_thread_args;
+
 
 void guess_key(Relation** relations);
+void* print_key(void* args);
+void guess_key_optimized(Relation** relations);
 Subkey_element* guess_subkey(int to_guess, Relation** relations, int* guessed);
 void resolve_relations(int start, Relation** relations, char* new_guessed, char* xor_array);
 void combine_subkeys(Subkey_element* subkeys_list, int* partial_key);
@@ -57,17 +66,17 @@ int main(int argc, char** argv) {
     
     M = N;      //could be changed
     threshold = 0.9;    //could be changed
-    int max_threads = 100;
+    max_threads = 100;
     
     Relation* relations[KEY_SIZE];
     
     switch (sampletype){
         case 'f':
-            calculate_collisions_float(infile, max_threads, relations);
+            calculate_collisions_float(infile, relations);
           break;
 
         case 'd':
-            calculate_collisions_double(infile, max_threads, relations);
+            calculate_collisions_double(infile, relations);
           break;
 
         default:
@@ -96,11 +105,74 @@ int main(int argc, char** argv) {
     return (EXIT_SUCCESS);
 }
 
-
 /*
- Recursive function no, too much overhead
+ * Guess the key basing on the infered relations, starting from an unknown byte
  */
 void guess_key(Relation** relations){
+    pthread_t id;
+    for(int i=0; i<BYTE_SPACE; i++){
+        Printkey_thread_args* args = malloc(sizeof(Printkey_thread_args));
+        args->relations = relations;
+        args->unkn_byte = i;
+        pthread_create(&id, NULL, print_key, args);
+    }
+    return;
+}
+
+/*
+ * Given an unknown byte, compute all the other key bytes according to the relations 
+ */
+void* print_key(void* args){
+    Printkey_thread_args* args_casted = (Printkey_thread_args*) args;
+    Relation** relations = args_casted->relations;
+    uint8_t unkn_byte = args_casted->unkn_byte;
+    uint8_t guessed[KEY_SIZE];
+    char key[KEY_SIZE];
+    
+    for(int j=1; j<KEY_SIZE; j++){
+        guessed[j] = FALSE;
+    }
+    guessed[0] = TRUE;
+    key[0] = unkn_byte;
+
+    int one_guessed = TRUE;
+    int total_guessed = 1;
+    while(one_guessed && total_guessed<KEY_SIZE){
+        one_guessed = FALSE;
+        for(int j=0; j<KEY_SIZE; j++){
+            if(guessed[j]==FALSE){
+                Relation* curr = relations[j];
+                while(curr!=NULL){
+                    if(guessed[curr->in_relation_with]==TRUE){
+                        key[j] = key[curr->in_relation_with] ^ curr->value;
+                        guessed[j] = TRUE;
+                        total_guessed++;
+                        one_guessed = TRUE;
+                        break;
+                    }
+                    curr = curr->next;
+                }
+            }
+        }
+    }
+    pthread_mutex_lock(&mutex_printf); 
+    for(int j=0; j<KEY_SIZE; j++){
+        if(guessed[j]==TRUE){
+            printf("%02x", key[j] & 0xff);
+        }
+        else{
+            printf("XX");
+        }
+    }
+    printf("\n");
+    pthread_mutex_unlock(&mutex_printf); 
+}; 
+
+
+/*
+ * Optimized but not working method to try to guess the key in a faster manner
+ */
+void guess_key_optimized(Relation** relations){
     int i=0;
     int guessed[KEY_SIZE];
     for(i=0; i<KEY_SIZE; i++){
@@ -134,6 +206,9 @@ void guess_key(Relation** relations){
     free(subkey_pointer_current);
 }
 
+/*
+ * Guess a subset of the key starting from the key bytes that are in relation
+ */
 Subkey_element* guess_subkey(int to_guess, Relation** relations, int* guessed){
     int i=0;
     unsigned char c=0;
@@ -150,7 +225,7 @@ Subkey_element* guess_subkey(int to_guess, Relation** relations, int* guessed){
     if(relations[to_guess]!=NULL){
         resolve_relations(to_guess, relations, new_guessed, xor_array);
     }
-    for(c=0; c<256; c++){   //sostituire 256 con byte_space?
+    for(c=0; c<BYTE_SPACE; c++){
         for(i=0; i<KEY_SIZE; i++){
             random_value[i]=c;
         }
@@ -159,11 +234,14 @@ Subkey_element* guess_subkey(int to_guess, Relation** relations, int* guessed){
         }
     }
     for(i=0; i<KEY_SIZE; i++){
-        guessed[i] = guessed[i] | new_guessed[i];   //controllare se funziona, è un or tra int e char
+        guessed[i] = guessed[i] | new_guessed[i];
     }
     return new_subkeys;
 }
 
+/*
+ * Simplify the relation to use them faster when guessing the key
+ */
 void resolve_relations(int start, Relation** relations, char* new_guessed, char* xor_array){        
     new_guessed[start]=TRUE;
     Relation* pointer = relations[start];
@@ -176,7 +254,9 @@ void resolve_relations(int start, Relation** relations, char* new_guessed, char*
     }
 }
 
-
+/*
+ * Combine the subkeys in every possible combination to obtain all the possible final keys
+ */
 void combine_subkeys(Subkey_element* subkeys_list, int* partial_key){
     Subkey_element* list_pointer = subkeys_list;
     int** subkey_pointer = (int**) list_pointer->subkeys;
@@ -188,7 +268,10 @@ void combine_subkeys(Subkey_element* subkeys_list, int* partial_key){
             for(j=0; j<KEY_SIZE_INT; j++){
                 ((int*) key)[j] = partial_key[j] ^ subkey_pointer[i][j];
             }
-            printf("%s\n", key);
+            for(j=0; j<KEY_SIZE; j++){
+                printf("%x", key[j]);
+            }
+            printf("\n");
         }
     }
     else{

@@ -15,6 +15,7 @@
 #define ICCPA_H
 
 #include <stdio.h>
+#include <pthread.h>
 
 #ifdef __cplusplus
 extern "C" {
@@ -29,6 +30,8 @@ int plaintextlen;   //length of plaintext in bytes
 int M;        //number of plaintext messages
 float threshold;    //threshold for collision determination
 
+int max_threads;    //max number of threads to run simultaneously
+pthread_mutex_t mutex_relations;
 
 typedef struct Relation_s{
     int in_relation_with;
@@ -38,8 +41,8 @@ typedef struct Relation_s{
 
 
 
-void calculate_collisions_float(FILE* infile, int max_threads_number, Relation** relations);
-void calculate_collisions_double(FILE* infile, int max_threads_number, Relation** relations);
+void calculate_collisions_float(FILE* infile, Relation** relations);
+void calculate_collisions_double(FILE* infile, Relation** relations);
     
     
 
