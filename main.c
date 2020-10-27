@@ -1,12 +1,6 @@
-/*
- * To change this license header, choose License Headers in Project Properties.
- * To change this template file, choose Tools | Templates
- * and open the template in the editor.
- */
-
 /* 
  * File:   main.c
- * Author: bob
+ * Author: Emanuele Pisano
  *
  * Created on 19 agosto 2020, 10.51
  */
