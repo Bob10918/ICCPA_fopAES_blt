@@ -27,8 +27,8 @@ typedef struct {
 }Thread_args_f;
 
 
-void read_data_f(FILE* input, FILE* traces_pointers[plaintextlen][BYTE_SPACE], char plaintexts[M][plaintextlen]);
-void get_relations_f(FILE* traces_pointers[plaintextlen][BYTE_SPACE], char m[M][KEY_SIZE], Relation** relations);
+void read_data_f(FILE* input, char plaintexts[M][plaintextlen]);
+void get_relations_f(char m[M][KEY_SIZE], Relation** relations);
 void* find_collisions_f(void* args);
 DATA_TYPE standard_deviation_f(DATA_TYPE** T, int theta, int t);
 DATA_TYPE covariance_f(DATA_TYPE** T, int theta0, int theta1, int t, DATA_TYPE* sum_array);
@@ -44,12 +44,12 @@ void compute_arrays_f(DATA_TYPE** T, DATA_TYPE* sum_array, DATA_TYPE* std_dev_ar
  */
 void calculate_collisions_float(FILE* infile, Relation** relations){
     
-    FILE* traces_pointers[plaintextlen][BYTE_SPACE];
     char m[M][plaintextlen];
     
     char fcurr_name[50];
     char to_concat[10];    
 
+    FILE* curr;
     mkdir("./iccpa_fopaes_blt_temp", 0700);
     for(int i=0 ; i<plaintextlen ; i++){
         for(int j=0 ; j<BYTE_SPACE ; j++){
@@ -59,41 +59,27 @@ void calculate_collisions_float(FILE* infile, Relation** relations){
             strcat(fcurr_name, "_");
             sprintf(to_concat, "%d", j);
             strcat(fcurr_name, to_concat);
-            traces_pointers[i][j] = fopen(fcurr_name, "w+");
+            curr = fopen(fcurr_name, "w+");
+            fclose(curr);
         }
     }
     
-    read_data_f(infile, traces_pointers, m);
+    read_data_f(infile, m);
     
-    for(int i=0 ; i<plaintextlen ; i++){
-        for(int j=0 ; j<BYTE_SPACE ; j++){
-            fclose(traces_pointers[i][j]);
-        }
-    }
-    fclose(infile);
+    fclose(infile);    
     
-    for(int i=0 ; i<plaintextlen ; i++){
-        for(int j=0 ; j<BYTE_SPACE ; j++){
-            strcpy(fcurr_name, "./iccpa_fopaes_blt_temp/");
-            sprintf(to_concat, "%d", i+1);
-            strcat(fcurr_name, to_concat);
-            strcat(fcurr_name, "_");
-            sprintf(to_concat, "%d", j);
-            strcat(fcurr_name, to_concat);
-            traces_pointers[i][j] = fopen(fcurr_name, "r");
-        }
-    }
-    
-    
-    get_relations_f(traces_pointers, m, relations);
+    get_relations_f(m, relations);
     
 }
 
 /*
  * Correctly reads data from the file, basing on the data type
  */
-void read_data_f(FILE* input, FILE* traces_pointers[plaintextlen][BYTE_SPACE], char plaintexts[M][plaintextlen]){
+void read_data_f(FILE* input, char plaintexts[M][plaintextlen]){
     DATA_TYPE temp[plaintextlen][l];
+    FILE* fcurr;
+    char fcurr_name[50];
+    char to_concat[10];
     
     for(int j=0; j<N; j++){
         //read the first l*plaintextlen samples (corresponding to first round computation)
@@ -108,7 +94,15 @@ void read_data_f(FILE* input, FILE* traces_pointers[plaintextlen][BYTE_SPACE], c
         //store the data read in the relative temp files
         for(int i=0; i<plaintextlen; i++){
             uint8_t byte_value = (uint8_t) plaintexts[j][i];
-            fwrite(temp[i], sizeof(DATA_TYPE), l, traces_pointers[i][byte_value]);
+            strcpy(fcurr_name, "./iccpa_fopaes_blt_temp/");
+            sprintf(to_concat, "%d", i+1);
+            strcat(fcurr_name, to_concat);
+            strcat(fcurr_name, "_");
+            sprintf(to_concat, "%d", byte_value);
+            strcat(fcurr_name, to_concat);
+            fcurr = fopen(fcurr_name, "a");
+            fwrite(temp[i], sizeof(DATA_TYPE), l, fcurr);
+            fclose(fcurr);            
         }
     }
 }
@@ -196,7 +190,7 @@ DATA_TYPE standard_deviation_f(DATA_TYPE** T, int theta, int t){
  * Infer relations abut the key starting from the samples, storing them all in an array of linked lists
  * Spawn a thread for every trace
  */
-void get_relations_f(FILE* traces_pointers[plaintextlen][BYTE_SPACE], char m[M][KEY_SIZE], Relation* relations[KEY_SIZE]){
+void get_relations_f(char m[M][KEY_SIZE], Relation* relations[KEY_SIZE]){
     DATA_TYPE** T;
     DATA_TYPE temp[l];
     int i=0, threads_count=0;
@@ -205,6 +199,10 @@ void get_relations_f(FILE* traces_pointers[plaintextlen][BYTE_SPACE], char m[M][
     pthread_t running_threads[max_threads];
     void* ul[1];
     ul[0] = malloc(sizeof(int));
+    
+    FILE* fcurr;
+    char fcurr_name[50];
+    char to_concat[10];
     
     for(i=0; i<KEY_SIZE; i++){
         relations[i]=NULL;
@@ -218,15 +216,19 @@ void get_relations_f(FILE* traces_pointers[plaintextlen][BYTE_SPACE], char m[M][
                 T[j] = malloc(sizeof(DATA_TYPE)*l*KEY_SIZE);
                 for(int k=0; k<plaintextlen; k++){
                     uint8_t byte_value = (uint8_t) m[i][k];
-                    fread(temp, sizeof(DATA_TYPE), l, traces_pointers[k][byte_value]);
+                    strcpy(fcurr_name, "./iccpa_fopaes_blt_temp/");
+                    sprintf(to_concat, "%d", k+1);
+                    strcat(fcurr_name, to_concat);
+                    strcat(fcurr_name, "_");
+                    sprintf(to_concat, "%d", byte_value);
+                    strcat(fcurr_name, to_concat);
+                    fcurr = fopen(fcurr_name, "r");
+                    fread(temp, sizeof(DATA_TYPE), l, fcurr);
+                    fclose(fcurr);
                     for(int q=0; q<l; q++){
                         T[j][k*l+q] = temp[q];
                     }
                 }
-            }
-            for(int j=0; j<plaintextlen; j++){
-                    uint8_t byte_value = (uint8_t) m[i][j];
-                    rewind(traces_pointers[j][byte_value]);
             }
 
             args->T = T;
