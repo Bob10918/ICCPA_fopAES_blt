@@ -10,10 +10,6 @@
 #include <stdio.h>
 #include <pthread.h>
 
-#ifdef __cplusplus
-extern "C" {
-#endif
-
 int N;        //number of power traces captured from a device processing N encryptions of the same message
 int n;     //number of encryption of the same message
 int nsamples;   //total number of samples per power trace
@@ -37,11 +33,6 @@ typedef struct Relation_s{
 void calculate_collisions_float(FILE* infile, Relation** relations);
 void calculate_collisions_double(FILE* infile, Relation** relations);
     
-    
-
-#ifdef __cplusplus
-}
-#endif
 
 #endif /* ICCPA_H */
 

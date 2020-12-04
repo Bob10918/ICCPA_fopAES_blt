@@ -9,8 +9,10 @@
 
 #include <stdio.h>
 #include <stdlib.h>
+#include <string.h>
 #include <stdint.h>
 #include <unistd.h>
+#include <ctype.h>
 #include <pthread.h>
 
 #define TRUE 0xff
@@ -35,32 +37,80 @@ typedef struct Printkey_thread_args_s{
 }Printkey_thread_args;
 
 
+void help();
 void guess_key(Relation** relations);
 void* print_key(void* args);
 void guess_key_optimized(Relation** relations);
 Subkey_element* guess_subkey(int to_guess, Relation** relations, int* guessed);
-void resolve_relations(int start, Relation** relations, char* new_guessed, char* xor_array);
+void resolve_relations(int start, Relation** relations, uint8_t* new_guessed, uint8_t* xor_array);
 void combine_subkeys(Subkey_element* subkeys_list, int* partial_key);
 
 
 int main(int argc, char** argv) {
     
-    FILE* infile = fopen(argv[1], "r");
+    char* file_name = NULL;
+    
+    //Set parameters to default value
+    n = 30;     //number of power traces for each message
+    l = 15;     //number of samples per clock
+    threshold = 0.9;        //threshold beyond which collision is accepted
+    max_threads = 50;       //maximum number of threads to spawn
+    M = -1;     //to check if user insert a different value
+    
+    //Read parameters from command line argument
+    opterr = 0;
+    char c;
+    while ((c = getopt (argc, argv, "f:n:l:m:t:x:h")) != -1)
+        switch (c)
+        {
+        case 'f':
+            file_name = optarg;
+            break;
+        case 'n':
+            n = atoi(optarg);
+            break;
+        case 'l':
+            l = atoi(optarg);
+            break;
+        case 'm':
+            M = atoi(optarg);
+            break;
+        case 't':
+            threshold = (float) strtof(optarg, NULL);
+            break;
+        case 'x':
+            max_threads = atoi(optarg);
+            break;
+        case 'h':
+            help();
+            return 1;
+            break;
+        case '?':
+            if (optopt == 'c')
+                fprintf (stderr, "Option -%c requires an argument.\n", optopt);
+            else if (isprint (optopt))
+                fprintf (stderr, "Unknown option `-%c'.\n", optopt);
+            else
+                fprintf (stderr,
+                    "Unknown option character `\\x%x'.\n",
+                    optopt);
+            return 1;
+            abort ();
+        }
+      
+    if(file_name==NULL){
+        printf("Parameter -f is required\n");
+        return 1;
+    }  
+    FILE* infile = fopen(file_name, "r");
     fread(&N, sizeof(uint32_t), 1, infile);
-    int N_print = N;      //only for debugging
-    n = 30;     //could be set to a different value
+    if(M==-1) M = N;      //number of different messages, each one being encrypted n times;
     fread(&nsamples, sizeof(uint32_t), 1, infile);
-    l = 15;      //could be set at nsamples/KEY_SIZE/number_of_rounds
     fread(&sampletype, sizeof(char), 1, infile);
-    char st = sampletype;
     uint8_t plaintextlen_temp;
     fread(&plaintextlen_temp, sizeof(uint8_t), 1, infile);
     plaintextlen = (int) plaintextlen_temp;
-    int ptl = plaintextlen;     //only for debugging
-    
-    M = N;      //could be changed
-    threshold = 0.9;    //could be changed
-    max_threads = 100;
+   
     
     Relation* relations[KEY_SIZE];
     
@@ -76,7 +126,6 @@ int main(int argc, char** argv) {
         default:
             exit(-1);
     }
-    
     
     guess_key(relations);
     
@@ -99,6 +148,18 @@ int main(int argc, char** argv) {
     return (EXIT_SUCCESS);
 }
 
+void help(){
+    printf("Improved Collision-Correlation Power Analysis on First Order Protected AES (for Blinded Lookup Table implementations)\n");
+    printf("Usage: iccpa_fopaes_blt <file> <options>\n");
+    printf("    <file> argument is required\n");
+    printf("    Options:\n");
+    printf("    -n      Specify number of power traces for each message (default: 30)\n");
+    printf("    -l      Specify number of samples per clock (default: 15)\n");
+    printf("    -m      Specify number of different messages, each one being encrypted n times (default: number of power traces in given file)\n");
+    printf("    -t      Specify threshold beyond which collision is accepted, in range 0 to 1 (default: 0.9)\n");
+    printf("    -x      Specify maximum number of threads to spawn during computations (default: 50)\n");
+    printf("    -h      Show this help\n");
+}
 /*
  * Guess the key basing on the infered relations, starting from an unknown byte
  */
@@ -159,8 +220,9 @@ void* print_key(void* args){
         }
     }
     printf("\n");
-    pthread_mutex_unlock(&mutex_printf); 
-}; 
+    pthread_mutex_unlock(&mutex_printf);
+    return args;
+}
 
 
 /*
@@ -205,15 +267,15 @@ void guess_key_optimized(Relation** relations){
  */
 Subkey_element* guess_subkey(int to_guess, Relation** relations, int* guessed){
     int i=0;
-    unsigned char c=0;
-    char xor_array[KEY_SIZE];
-    char new_guessed[KEY_SIZE];
+    uint8_t c=0;
+    uint8_t xor_array[KEY_SIZE];
+    uint8_t new_guessed[KEY_SIZE];
     for(i=0; i<KEY_SIZE; i++){
         new_guessed[i]=FALSE;
         xor_array[i] = 0x00;
     }
     new_guessed[to_guess] = TRUE;
-    char random_value[KEY_SIZE];
+    uint8_t random_value[KEY_SIZE];
     Subkey_element* new_subkeys = malloc(sizeof(Subkey_element));
     
     if(relations[to_guess]!=NULL){
@@ -236,7 +298,7 @@ Subkey_element* guess_subkey(int to_guess, Relation** relations, int* guessed){
 /*
  * Simplify the relation to use them faster when guessing the key
  */
-void resolve_relations(int start, Relation** relations, char* new_guessed, char* xor_array){        
+void resolve_relations(int start, Relation** relations, uint8_t* new_guessed, uint8_t* xor_array){        
     new_guessed[start]=TRUE;
     Relation* pointer = relations[start];
     while(pointer!=NULL){
