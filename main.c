@@ -55,7 +55,7 @@ int main(int argc, char** argv) {
     l = 15;     //number of samples per clock
     threshold = 0.9;        //threshold beyond which collision is accepted
     max_threads = 50;       //maximum number of threads to spawn
-    M = -1;     //to check if user insert a different value
+    M = -1;     //number of different messages, each one being encrypted n times (set to -1 to check if user insert a different value)
     
     //Read parameters from command line argument
     opterr = 0;
@@ -104,7 +104,7 @@ int main(int argc, char** argv) {
     }  
     FILE* infile = fopen(file_name, "r");
     fread(&N, sizeof(uint32_t), 1, infile);
-    if(M==-1) M = N;      //number of different messages, each one being encrypted n times;
+    if(M==-1) M = N;      //set to N if user hasn't inserted a custom value
     fread(&nsamples, sizeof(uint32_t), 1, infile);
     fread(&sampletype, sizeof(char), 1, infile);
     uint8_t plaintextlen_temp;
@@ -148,6 +148,9 @@ int main(int argc, char** argv) {
     return (EXIT_SUCCESS);
 }
 
+/*
+ * Show a brief help
+ */
 void help(){
     printf("Improved Collision-Correlation Power Analysis on First Order Protected AES (for Blinded Lookup Table implementations)\n");
     printf("Usage: iccpa_fopaes_blt <file> <options>\n");
@@ -160,6 +163,7 @@ void help(){
     printf("    -x      Specify maximum number of threads to spawn during computations (default: 50)\n");
     printf("    -h      Show this help\n");
 }
+
 /*
  * Guess the key basing on the infered relations, starting from an unknown byte
  */
@@ -221,7 +225,10 @@ void* print_key(void* args){
     }
     printf("\n");
     pthread_mutex_unlock(&mutex_printf);
-    return args;
+    
+    //free memory allocated
+    free(args_casted);
+    return NULL;
 }
 
 

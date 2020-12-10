@@ -6,7 +6,7 @@ OBJ = iccpa_fopaes_blt.o calculate_collisions_float.o calculate_collisions_doubl
 default: iccpa_fopaes_blt
 
 iccpa_fopaes_blt: $(OBJ)
-	$(CC) $(CFLAGS) -o iccpa_fopaes $(OBJ) $(LDFLAGS)
+	$(CC) $(CFLAGS) -o iccpa_fopaes_blt $(OBJ) $(LDFLAGS)
 	
 iccpa_fopaes_blt.o: main.c iccpa.h
 	$(CC) $(CFLAGS) -o iccpa_fopaes_blt.o -c main.c

@@ -1,5 +1,5 @@
 /* 
- * File:   calculate_collisions.h
+ * File:   calculate_collisions.c
  * Author: Emanuele Pisano
  *
  */
@@ -22,7 +22,7 @@
 
 #define KEY_SIZE 16     //key size in byte
 
-
+//functions names definition (generate function name basing on data type passed)
 #define MAKE_FN_NAME(name, type) name ## _ ## type
 #define THREAD_ARGS(type) MAKE_FN_NAME(Thread_args, type)
 #define CALCULATE_COLLISIONS(type) MAKE_FN_NAME(calculate_collisions, type)
@@ -136,12 +136,9 @@ int COLLISION(DATA_TYPE)(DATA_TYPE** T, int theta0, int theta1, DATA_TYPE* sum_a
     
     //check if max is greater than threshold
     if(max_correlation>threshold){
-        double one = 1.0000;
-        if(max_correlation != one) printf("true: %f\n", max_correlation);
         return TRUE;
     }
     else{
-        printf("false: %f\n", max_correlation);
         return FALSE;
     }
 }
@@ -278,6 +275,7 @@ void GET_RELATIONS(DATA_TYPE)(char m[M][KEY_SIZE], Relation* relations[KEY_SIZE]
         }
         threads_count = 0;
     }
+    free(ul[0]);
 }
 
 /*
@@ -319,5 +317,12 @@ void* FIND_COLLISIONS(DATA_TYPE)(void* args){
             }
         }      
     }
+    
+    //free memory allocated for thread argument
+    for(int j=0; j<n; j++){
+        free(T[j]);
+    }
+    free(T);
+    free(args_casted);
     pthread_exit(NULL);
 }

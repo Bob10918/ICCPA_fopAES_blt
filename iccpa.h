@@ -16,7 +16,7 @@ int nsamples;   //total number of samples per power trace
 int l;        //number of samples per instruction processing (clock)
 char sampletype;    //type of samples, f=float  d=double
 int plaintextlen;   //length of plaintext in bytes
-int M;        //number of plaintext messages
+int M;        //number of plaintext messages, each one being encrypted n times
 float threshold;    //threshold for collision determination
 
 int max_threads;    //max number of threads to run simultaneously
@@ -26,7 +26,7 @@ typedef struct Relation_s{
     int in_relation_with;
     char value;
     struct Relation_s* next;
-}Relation;  //controllare se struct sono puntatori
+}Relation;
 
 
 
@@ -34,5 +34,5 @@ void calculate_collisions_float(FILE* infile, Relation** relations);
 void calculate_collisions_double(FILE* infile, Relation** relations);
     
 
-#endif /* ICCPA_H */
+#endif
 
