@@ -5,5 +5,4 @@
 iccpa_fopaes_blt_temp/
 iccpa_fopaes_blt
 .dep.inc
-sbox.dat
-ttab.dat
+*.dat
